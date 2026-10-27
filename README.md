@@ -30,8 +30,9 @@ Open the local URL printed by Vite, usually http://localhost:5173/.
 
 ## Architecture
 
-React and Vite interface → Express API → SQLite database  
-Express API → rule-based food matching → delivery assignment
+React and Vite interface → Express API → SQLite database
+Express API → rule-based food matching → demo partner assignment → delivery updates
+Dashboard summary and recent activity → saved SQLite records
 
 ## Demo flow
 
@@ -40,6 +41,8 @@ Express API → rule-based food matching → delivery assignment
 3. Open the delivery board to see its demo partner and ETA.
 4. Use Reassign partner or Confirm arrival to show delivery updates.
 
-## Prototype limits
+## Forecast and prototype limits
 
-Food matching uses rules, and the demo ETA is fixed at 30 minutes. The dashboard forecast figures are sample data. The app does not yet use a trained AI model, live maps, or GPS tracking.
+The dashboard forecast uses surplus posts saved during comparable three-hour clock windows in the last 28 days. It averages days with matching saved offers and shows an empty estimate until it has comparable records. This is a transparent early-data baseline, not a trained AI model. Dashboard counts, delivery rows, and recent activity come from the local SQLite database.
+
+Food matching uses food categories, remaining portions, expiry and need deadlines. The demo ETA is fixed at 30 minutes. Partner availability is simulated; the app has no live maps, GPS tracking, cloud database, or production authentication.

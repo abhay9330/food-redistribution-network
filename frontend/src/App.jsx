@@ -1,104 +1,50 @@
+import { useEffect, useState } from 'react'
 import './App.css'
 import SupplyDemand from '../components/supplydemand'
 import DeliveryBoard from '../components/deliveryboarad'
 
+const API_URL = 'http://localhost:3001'
 
-const stats = [
-  {
-    label: 'Predicted surplus',
-    value: '186',
-    unit: 'meals',
-    note: 'Expected from 7 kitchens tonight',
-    mark: '↗',
-    tone: 'green',
-  },
-  {
-    label: 'Open food requests',
-    value: '12',
-    unit: 'organisations',
-    note: '4 requests added today',
-    mark: '◎',
-    tone: 'orange',
-  },
-  {
-    label: 'Deliveries in progress',
-    value: '08',
-    unit: 'routes',
-    note: '6 expected before expiry',
-    mark: '⌁',
-    tone: 'blue',
-  },
-  {
-    label: 'Rescued this week',
-    value: '1,248',
-    unit: 'meals',
-    note: 'Across the local network',
-    mark: '✳',
-    tone: 'purple',
-  },
-]
-
-const deliveries = [
-  {
-    id: 'DL-204',
-    donor: 'Harbor Hostel',
-    food: '38 meal boxes',
-    recipient: 'Sahaara Community Kitchen',
-    route: '4.2 km · 18 min',
-    eta: '6:40 PM',
-    expiry: '8:30 PM',
-    status: 'On the way',
-    tone: 'moving',
-  },
-  {
-    id: 'DL-203',
-    donor: 'Green Bowl Cafe',
-    food: '24 rice bowls',
-    recipient: 'Hope Food Bank',
-    route: '2.1 km · 12 min',
-    eta: '7:05 PM',
-    expiry: '8:00 PM',
-    status: 'Pickup soon',
-    tone: 'pickup',
-  },
-  {
-    id: 'DL-202',
-    donor: 'North Campus Mess',
-    food: '16 meal packs',
-    recipient: 'City Shelter',
-    route: '6.8 km · 29 min',
-    eta: '7:18 PM',
-    expiry: '7:45 PM',
-    status: 'At risk',
-    tone: 'risk',
-  },
-]
-
-const activity = [
-  {
-    type: 'Forecast',
-    time: '2 min ago',
-    text: 'Harbor Hostel may have 38 extra meal portions tonight.',
-    symbol: '↗',
-    tone: 'green',
-  },
-  {
-    type: 'Match made',
-    time: '8 min ago',
-    text: '24 rice bowls matched to Hope Food Bank by need and distance.',
-    symbol: '◎',
-    tone: 'orange',
-  },
-  {
-    type: 'Route updated',
-    time: '14 min ago',
-    text: 'Delivery DL-202 flagged: arrival is close to the food expiry time.',
-    symbol: '⌁',
-    tone: 'blue',
-  },
-]
+const emptyDashboard = {
+  forecast: { portions: null, kitchens: 0, observations: 0, note: 'Loading saved food offers…' },
+  stats: [],
+  deliveries: [],
+  activity: [],
+}
 
 function App() {
+  const [dashboard, setDashboard] = useState(emptyDashboard)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    let active = true
+
+    async function loadDashboard() {
+      try {
+        const response = await fetch(`${API_URL}/api/dashboard`)
+        if (!response.ok) throw new Error('Dashboard data could not be loaded.')
+        const data = await response.json()
+        if (active) {
+          setDashboard(data)
+          setError('')
+        }
+      } catch (loadError) {
+        if (active) setError(loadError.message || 'Backend nahi chal raha.')
+      } finally {
+        if (active) setLoading(false)
+      }
+    }
+
+    loadDashboard()
+    const refreshId = window.setInterval(loadDashboard, 15000)
+
+    return () => {
+      active = false
+      window.clearInterval(refreshId)
+    }
+  }, [])
+
   return (
     <div className="app-shell">
       <aside className="sidebar">
@@ -118,18 +64,18 @@ function App() {
 
         <p className="nav-heading">WORKSPACE</p>
         <nav className="nav-list">
-          <div className="nav-item selected"><span>▦</span> Overview</div>
-          <div className="nav-item"><span>＋</span> Food surplus</div>
-          <div className="nav-item"><span>♡</span> Recipient needs</div>
-          <div className="nav-item"><span>⌁</span> Deliveries</div>
+          <a className="nav-item selected" href="#overview"><span>▦</span> Overview</a>
+          <a className="nav-item" href="#food-surplus"><span>＋</span> Food surplus</a>
+          <a className="nav-item" href="#food-surplus"><span>♡</span> Recipient needs</a>
+          <a className="nav-item" href="#delivery-board"><span>⌁</span> Deliveries</a>
         </nav>
 
         <div className="sidebar-bottom">
           <div className="network-status">
             <span className="network-dot" />
             <div>
-              <strong>Demo network active</strong>
-              <small>Sample information</small>
+              <strong>{error ? 'Backend connection lost' : loading ? 'Connecting to database' : 'Local database connected'}</strong>
+              <small>Auto-refreshes every 15 seconds</small>
             </div>
           </div>
           <div className="profile">
@@ -143,39 +89,46 @@ function App() {
         </div>
       </aside>
 
-      <main className="main-content">
+      <main className="main-content" id="overview">
         <header className="topbar">
           <div>
             <p className="eyebrow">FOOD SECURITY NETWORK</p>
             <h1>Good food, where it is needed.</h1>
             <p className="subtitle">
-              A live view of surplus, community needs and time-sensitive deliveries.
+              A live view of saved surplus, community needs and time-sensitive deliveries.
             </p>
           </div>
           <div className="topbar-right">
-            <span className="demo-badge"><span /> DEMO DATA</span>
+            <span className="demo-badge"><span /> LOCAL DATA</span>
             <div className="top-avatar">AP</div>
           </div>
         </header>
+
+        {error && <div className="dashboard-message error-message">{error} Check that the backend is running on port 3001.</div>}
 
         <section className="forecast-banner">
           <div className="forecast-icon">✳</div>
           <div className="forecast-copy">
             <span className="banner-label">SURPLUS FORECAST · NEXT 3 HOURS</span>
-            <h2>186 meals could be available tonight.</h2>
+            <h2>
+              {loading
+                ? 'Loading saved food history…'
+                : dashboard.forecast.portions === null
+                  ? 'Not enough matching offer history yet.'
+                  : `About ${dashboard.forecast.portions} portions may be offered.`}
+            </h2>
             <p>
-              The forecast helps the network prepare recipients and delivery partners
-              before food is ready.
+              {dashboard.forecast.note} This is a simple recent-data estimate, not a trained AI model.
             </p>
           </div>
           <div className="forecast-side">
-            <strong>7</strong>
-            <span>kitchens<br />expected to have surplus</span>
+            <strong>{dashboard.forecast.kitchens}</strong>
+            <span>donors in the<br />matching time window</span>
           </div>
         </section>
 
         <section className="stats-grid">
-          {stats.map((stat) => (
+          {dashboard.stats.map((stat) => (
             <article className="stat-card" key={stat.label}>
               <div className={`stat-mark ${stat.tone}`}>{stat.mark}</div>
               <p className="stat-label">{stat.label}</p>
@@ -194,7 +147,7 @@ function App() {
                 <p className="eyebrow">NETWORK ACTIVITY</p>
                 <h2>Active deliveries</h2>
               </div>
-              <span className="small-count">3 shown</span>
+              <span className="small-count">{dashboard.deliveries.length} shown</span>
             </div>
 
             <div className="table-wrap">
@@ -203,12 +156,12 @@ function App() {
                   <tr>
                     <th>FOOD & DONOR</th>
                     <th>RECIPIENT</th>
-                    <th>ROUTE / ETA</th>
+                    <th>PARTNER / ETA</th>
                     <th>STATUS</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {deliveries.map((delivery) => (
+                  {dashboard.deliveries.map((delivery) => (
                     <tr key={delivery.id}>
                       <td>
                         <strong>{delivery.food}</strong>
@@ -220,7 +173,7 @@ function App() {
                       </td>
                       <td>
                         <strong>{delivery.eta}</strong>
-                        <span className="cell-sub">{delivery.route}</span>
+                        <span className="cell-sub">{delivery.partner}</span>
                       </td>
                       <td>
                         <span className={`status-pill ${delivery.tone}`}>
@@ -229,28 +182,31 @@ function App() {
                       </td>
                     </tr>
                   ))}
+                  {!dashboard.deliveries.length && (
+                    <tr><td colSpan="4" className="empty-table">{loading ? 'Loading deliveries…' : 'No active deliveries yet. Add matching surplus and recipient needs below.'}</td></tr>
+                  )}
                 </tbody>
               </table>
             </div>
 
             <div className="table-footnote">
               <span className="footnote-dot" />
-              Arrival estimates are compared with each food listing's expiry time.
+              ETA uses the backend's fixed 30-minute demo estimate; there is no live map route.
             </div>
           </article>
 
           <article className="panel activity-panel">
             <div className="panel-header">
               <div>
-                <p className="eyebrow">AGENT ACTIVITY</p>
+                <p className="eyebrow">RECENT DATABASE EVENTS</p>
                 <h2>Network updates</h2>
               </div>
               <span className="live-label"><span /> LIVE</span>
             </div>
 
             <div className="activity-list">
-              {activity.map((item) => (
-                <div className="activity-item" key={item.type}>
+              {dashboard.activity.map((item) => (
+                <div className="activity-item" key={item.id}>
                   <div className={`activity-icon ${item.tone}`}>{item.symbol}</div>
                   <div className="activity-copy">
                     <div className="activity-meta">
@@ -261,20 +217,24 @@ function App() {
                   </div>
                 </div>
               ))}
+              {!dashboard.activity.length && (
+                <p className="empty-activity">{loading ? 'Loading recent updates…' : 'Saved surplus, need and delivery changes will appear here.'}</p>
+              )}
             </div>
 
             <div className="agent-note">
               <span className="sparkle">✦</span>
-              <p><strong>Next:</strong> match available food with open requests and feasible routes.</p>
+              <p><strong>Matching:</strong> food type, portions, expiry/deadline and demo partner availability.</p>
             </div>
           </article>
         </section>
-<SupplyDemand/>
-<DeliveryBoard />
+
+        <div id="food-surplus"><SupplyDemand /></div>
+        <div id="delivery-board"><DeliveryBoard /></div>
 
         <footer className="page-footer">
           <span>FoodLink · Food redistribution demo</span>
-          <span>Built for a more connected food network</span>
+          <span>Forecasts and ETAs use transparent demo rules</span>
         </footer>
       </main>
     </div>
