@@ -1,5 +1,7 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import './SupplyDemand.css'
+
+const API_URL = 'http://localhost:3001'
 
 const emptySupply = {
   food: '',
@@ -17,31 +19,77 @@ const emptyNeed = {
   neededBy: '',
 }
 
+async function api(path, options) {
+  const response = await fetch(`${API_URL}${path}`, options).catch(() => {
+    throw new Error('Backend nahi chal raha. Backend terminal check karo.')
+  })
+
+  const data = await response.json()
+  if (!response.ok) throw new Error(data.error || 'Request failed')
+  return data
+}
+
+function todayAt(time) {
+  const [hours, minutes] = time.split(':').map(Number)
+  const date = new Date()
+  date.setHours(hours, minutes, 0, 0)
+  return date.toISOString()
+}
+
+function displayTime(value) {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+
+  return date.toLocaleTimeString([], {
+    hour: 'numeric',
+    minute: '2-digit',
+  })
+}
+
+function mapSupply(row) {
+  return {
+    id: row.id,
+    food: row.food_item,
+    donor: row.donor,
+    portions: String(row.portions),
+    pickup: row.pickup_location,
+    expiry: displayTime(row.expires_at),
+  }
+}
+
+function mapNeed(row) {
+  return {
+    id: row.id,
+    organisation: row.organization,
+    food: row.food_needed,
+    portions: String(row.portions_needed),
+    dropoff: row.delivery_location,
+    neededBy: displayTime(row.needed_by),
+  }
+}
+
 export default function SupplyDemand() {
-  const [supplies, setSupplies] = useState([
-    {
-      id: 1,
-      food: 'Vegetable pulao',
-      donor: 'Harbor Hostel',
-      portions: '32',
-      pickup: 'Dock Road',
-      expiry: '8:30 PM',
-    },
-  ])
-
-  const [needs, setNeeds] = useState([
-    {
-      id: 2,
-      organisation: 'Sahaara Community Kitchen',
-      food: 'Cooked meals',
-      portions: '20',
-      dropoff: 'Market Street',
-      neededBy: '7:30 PM',
-    },
-  ])
-
+  const [supplies, setSupplies] = useState([])
+  const [needs, setNeeds] = useState([])
   const [supplyForm, setSupplyForm] = useState(emptySupply)
   const [needForm, setNeedForm] = useState(emptyNeed)
+
+  useEffect(() => {
+    let ignore = false
+
+    Promise.all([api('/api/surpluses'), api('/api/needs')])
+      .then(([supplyRows, needRows]) => {
+        if (!ignore) {
+          setSupplies(supplyRows.map(mapSupply))
+          setNeeds(needRows.map(mapNeed))
+        }
+      })
+      .catch((error) => console.error('Could not load listings:', error))
+
+    return () => {
+      ignore = true
+    }
+  }, [])
 
   function updateSupply(event) {
     setSupplyForm({ ...supplyForm, [event.target.name]: event.target.value })
@@ -51,16 +99,50 @@ export default function SupplyDemand() {
     setNeedForm({ ...needForm, [event.target.name]: event.target.value })
   }
 
-  function addSupply(event) {
+  async function addSupply(event) {
     event.preventDefault()
-    setSupplies([{ ...supplyForm, id: Date.now() }, ...supplies])
-    setSupplyForm(emptySupply)
+
+    try {
+      const saved = await api('/api/surpluses', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          foodItem: supplyForm.food,
+          donor: supplyForm.donor,
+          portions: Number(supplyForm.portions),
+          pickupLocation: supplyForm.pickup,
+          expiresAt: todayAt(supplyForm.expiry),
+        }),
+      })
+
+      setSupplies((current) => [mapSupply(saved), ...current])
+      setSupplyForm({ ...emptySupply })
+    } catch (error) {
+      window.alert(`Surplus save nahi hua: ${error.message}`)
+    }
   }
 
-  function addNeed(event) {
+  async function addNeed(event) {
     event.preventDefault()
-    setNeeds([{ ...needForm, id: Date.now() }, ...needs])
-    setNeedForm(emptyNeed)
+
+    try {
+      const saved = await api('/api/needs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          organization: needForm.organisation,
+          foodNeeded: needForm.food,
+          portionsNeeded: Number(needForm.portions),
+          deliveryLocation: needForm.dropoff,
+          neededBy: todayAt(needForm.neededBy),
+        }),
+      })
+
+      setNeeds((current) => [mapNeed(saved), ...current])
+      setNeedForm({ ...emptyNeed })
+    } catch (error) {
+      window.alert(`Food need save nahi hua: ${error.message}`)
+    }
   }
 
   return (
@@ -68,7 +150,9 @@ export default function SupplyDemand() {
       <header className="supply-heading">
         <p>NETWORK INTAKE</p>
         <h2>Food supply and community needs</h2>
-        <span>Add available food or tell the network what your organisation needs.</span>
+        <span>
+          Add available food or tell the network what your organisation needs.
+        </span>
       </header>
 
       <div className="intake-grid">
@@ -83,30 +167,66 @@ export default function SupplyDemand() {
 
           <label>
             Food item
-            <input name="food" value={supplyForm.food} onChange={updateSupply} placeholder="e.g. Vegetable pulao" required />
+            <input
+              name="food"
+              value={supplyForm.food}
+              onChange={updateSupply}
+              placeholder="e.g. Vegetable pulao"
+              required
+            />
           </label>
+
           <label>
             Restaurant or hostel
-            <input name="donor" value={supplyForm.donor} onChange={updateSupply} placeholder="Name of donor" required />
+            <input
+              name="donor"
+              value={supplyForm.donor}
+              onChange={updateSupply}
+              placeholder="Name of donor"
+              required
+            />
           </label>
 
           <div className="field-row">
             <label>
               Portions
-              <input name="portions" type="number" min="1" value={supplyForm.portions} onChange={updateSupply} placeholder="30" required />
+              <input
+                name="portions"
+                type="number"
+                min="1"
+                value={supplyForm.portions}
+                onChange={updateSupply}
+                placeholder="30"
+                required
+              />
             </label>
+
             <label>
               Food expires at
-              <input name="expiry" type="time" value={supplyForm.expiry} onChange={updateSupply} required />
+              <input
+                name="expiry"
+                type="time"
+                value={supplyForm.expiry}
+                onChange={updateSupply}
+                required
+              />
             </label>
           </div>
 
           <label>
             Pickup location
-            <input name="pickup" value={supplyForm.pickup} onChange={updateSupply} placeholder="Area or address" required />
+            <input
+              name="pickup"
+              value={supplyForm.pickup}
+              onChange={updateSupply}
+              placeholder="Area or address"
+              required
+            />
           </label>
 
-          <button type="submit" className="intake-button supply-button">Add surplus</button>
+          <button type="submit" className="intake-button supply-button">
+            Add surplus
+          </button>
         </form>
 
         <form className="intake-card" onSubmit={addNeed}>
@@ -120,30 +240,66 @@ export default function SupplyDemand() {
 
           <label>
             Organisation
-            <input name="organisation" value={needForm.organisation} onChange={updateNeed} placeholder="Organisation name" required />
+            <input
+              name="organisation"
+              value={needForm.organisation}
+              onChange={updateNeed}
+              placeholder="Organisation name"
+              required
+            />
           </label>
+
           <label>
             Food needed
-            <input name="food" value={needForm.food} onChange={updateNeed} placeholder="e.g. Cooked meals" required />
+            <input
+              name="food"
+              value={needForm.food}
+              onChange={updateNeed}
+              placeholder="e.g. Cooked meals"
+              required
+            />
           </label>
 
           <div className="field-row">
             <label>
               Portions needed
-              <input name="portions" type="number" min="1" value={needForm.portions} onChange={updateNeed} placeholder="20" required />
+              <input
+                name="portions"
+                type="number"
+                min="1"
+                value={needForm.portions}
+                onChange={updateNeed}
+                placeholder="20"
+                required
+              />
             </label>
+
             <label>
               Needed by
-              <input name="neededBy" type="time" value={needForm.neededBy} onChange={updateNeed} required />
+              <input
+                name="neededBy"
+                type="time"
+                value={needForm.neededBy}
+                onChange={updateNeed}
+                required
+              />
             </label>
           </div>
 
           <label>
             Delivery location
-            <input name="dropoff" value={needForm.dropoff} onChange={updateNeed} placeholder="Area or address" required />
+            <input
+              name="dropoff"
+              value={needForm.dropoff}
+              onChange={updateNeed}
+              placeholder="Area or address"
+              required
+            />
           </label>
 
-          <button type="submit" className="intake-button need-button">Add food need</button>
+          <button type="submit" className="intake-button need-button">
+            Add food need
+          </button>
         </form>
       </div>
 
@@ -153,6 +309,7 @@ export default function SupplyDemand() {
             <h3>Available surplus</h3>
             <span>{supplies.length} listings</span>
           </div>
+
           {supplies.map((item) => (
             <div className="listing-row" key={item.id}>
               <div>
@@ -172,6 +329,7 @@ export default function SupplyDemand() {
             <h3>Open recipient needs</h3>
             <span>{needs.length} requests</span>
           </div>
+
           {needs.map((item) => (
             <div className="listing-row" key={item.id}>
               <div>
