@@ -1,4 +1,6 @@
 import './App.css'
+import SupplyDemand from '../components/supplydemand'
+
 
 const stats = [
   {
@@ -232,7 +234,7 @@ function App() {
 
             <div className="table-footnote">
               <span className="footnote-dot" />
-              Arrival estimates are compared with each food listing’s expiry time.
+              Arrival estimates are compared with each food listing's expiry time.
             </div>
           </article>
 
@@ -266,6 +268,7 @@ function App() {
             </div>
           </article>
         </section>
+<SupplyDemand/>
 
         <footer className="page-footer">
           <span>FoodLink · Food redistribution demo</span>
