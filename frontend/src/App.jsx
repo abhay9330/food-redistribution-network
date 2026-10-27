@@ -1,5 +1,6 @@
 import './App.css'
 import SupplyDemand from '../components/supplydemand'
+import DeliveryBoard from '../components/deliveryboarad'
 
 
 const stats = [
@@ -269,6 +270,7 @@ function App() {
           </article>
         </section>
 <SupplyDemand/>
+<DeliveryBoard />
 
         <footer className="page-footer">
           <span>FoodLink · Food redistribution demo</span>
