@@ -132,6 +132,7 @@ button {
   border-radius: 9px;
   color: #bdc9c0;
   font-size: 13px;
+  text-decoration: none;
 }
 
 .nav-item span {
@@ -684,4 +685,23 @@ td strong {
   .page-footer {
     flex-direction: column;
   }
+}
+
+.dashboard-message {
+  margin: -8px 0 16px;
+  padding: 11px 14px;
+  border: 1px solid #f0c7bc;
+  border-radius: 10px;
+  background: #fff1ed;
+  color: #9b4938;
+  font-size: 12px;
+}
+
+.empty-table,
+.empty-activity {
+  padding: 22px 10px;
+  color: #849087;
+  font-size: 11px;
+  line-height: 1.6;
+  text-align: center;
 }

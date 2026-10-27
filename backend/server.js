@@ -47,6 +47,7 @@ db.exec(`
     status TEXT NOT NULL DEFAULT 'Matched',
     eta TEXT,
     arrived_at TEXT,
+    updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP
   );
 `)
@@ -62,6 +63,7 @@ function ensureColumn(table, column, definition) {
 
 ensureColumn('deliveries', 'partner_id', 'INTEGER')
 ensureColumn('deliveries', 'arrived_at', 'TEXT')
+ensureColumn('deliveries', 'updated_at', 'TEXT')
 
 // Demo delivery partners.
 const addPartner = db.prepare(`
@@ -237,12 +239,208 @@ function getDelivery(id) {
   return db.prepare(`${deliverySelect} WHERE deliveries.id = ?`).get(id)
 }
 
+function parseDatabaseDate(value) {
+  if (!value) return null
+  const text = String(value)
+  const normalized = text.includes('T') && /(?:Z|[+-]\d{2}:?\d{2})$/.test(text)
+    ? text
+    : `${text.replace(' ', 'T')}Z`
+  const date = new Date(normalized)
+  return Number.isNaN(date.getTime()) ? null : date
+}
+
+function formatClock(value) {
+  const date = parseDatabaseDate(value)
+  return date
+    ? new Intl.DateTimeFormat('en', { hour: 'numeric', minute: '2-digit' }).format(date)
+    : 'Not available'
+}
+
+function relativeTime(value, now = new Date()) {
+  const date = parseDatabaseDate(value)
+  if (!date) return 'time unavailable'
+  const minutes = Math.max(0, Math.floor((now.getTime() - date.getTime()) / 60000))
+  if (minutes < 1) return 'just now'
+  if (minutes < 60) return `${minutes} min ago`
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return `${hours} hr ago`
+  return `${Math.floor(hours / 24)} day ago`
+}
+
+function getSurplusForecast(surpluses, now = new Date()) {
+  const cutoff = now.getTime() - 28 * 24 * 60 * 60 * 1000
+  const startMinute = now.getHours() * 60 + now.getMinutes()
+  const days = new Map()
+
+  for (const item of surpluses) {
+    const created = parseDatabaseDate(item.created_at)
+    if (!created || created < new Date(cutoff) || created > now) continue
+
+    const createdMinute = created.getHours() * 60 + created.getMinutes()
+    const offset = (createdMinute - startMinute + 1440) % 1440
+    const clockDistance = Math.min(offset, 1440 - offset)
+    if (clockDistance > 180) continue
+
+    const dayKey = `${created.getFullYear()}-${created.getMonth()}-${created.getDate()}`
+    if (!days.has(dayKey)) days.set(dayKey, { portions: 0, donors: new Set() })
+    const day = days.get(dayKey)
+    day.portions += Number(item.portions || 0)
+    day.donors.add(item.donor)
+  }
+
+  if (!days.size) {
+    return {
+      portions: null,
+      kitchens: 0,
+      observations: 0,
+      note: 'No saved offer was posted during a comparable 3-hour window in the last 28 days.',
+    }
+  }
+
+  const observedDays = [...days.values()]
+  const portions = observedDays.reduce((sum, day) => sum + day.portions, 0)
+  const donors = observedDays.reduce((sum, day) => sum + day.donors.size, 0)
+
+  return {
+    portions: Math.round(portions / observedDays.length),
+    kitchens: Math.round(donors / observedDays.length),
+    observations: observedDays.length,
+    note: `Average of ${observedDays.length} day${observedDays.length === 1 ? '' : 's'} with saved offers in this time window over the last 28 days.`,
+  }
+}
+
+function getDashboardData() {
+  const now = new Date()
+  const surpluses = db.prepare('SELECT * FROM surpluses ORDER BY id DESC').all()
+  const needs = db.prepare('SELECT * FROM needs ORDER BY id DESC').all()
+  const deliveries = db.prepare(`${deliverySelect} ORDER BY deliveries.id DESC`).all()
+  const forecast = getSurplusForecast(surpluses, now)
+  const activeDeliveries = deliveries.filter(
+    (item) => !item.status.startsWith('Delivered') && item.status !== 'Cancelled'
+  )
+
+  const availablePortions = surpluses.reduce((sum, item) => {
+    const expiry = parseDatabaseDate(item.expires_at)
+    if (!expiry || expiry <= now) return sum
+    return sum + Math.max(0, availableSurplusPortions(item.id))
+  }, 0)
+  const openNeeds = needs.filter((item) => {
+    const deadline = parseDatabaseDate(item.needed_by)
+    return deadline && deadline > now && availableNeedPortions(item.id) > 0
+  })
+
+  const weekStart = new Date(now)
+  const daysSinceMonday = (weekStart.getDay() + 6) % 7
+  weekStart.setDate(weekStart.getDate() - daysSinceMonday)
+  weekStart.setHours(0, 0, 0, 0)
+  const rescuedThisWeek = deliveries
+    .filter((item) => item.status === 'Delivered before expiry')
+    .filter((item) => {
+      const arrived = parseDatabaseDate(item.arrived_at)
+      return arrived && arrived >= weekStart && arrived <= now
+    })
+    .reduce((sum, item) => sum + Number(item.portions || 0), 0)
+
+  const stats = [
+    {
+      label: 'Predicted surplus',
+      value: forecast.portions === null ? '—' : forecast.portions.toLocaleString('en'),
+      unit: 'portions',
+      note: `${availablePortions.toLocaleString('en')} unexpired portions currently available to match`,
+      mark: '↗', tone: 'green',
+    },
+    {
+      label: 'Open food requests',
+      value: openNeeds.length.toLocaleString('en'),
+      unit: 'requests',
+      note: `${openNeeds.reduce((sum, item) => sum + Math.max(0, availableNeedPortions(item.id)), 0).toLocaleString('en')} portions still requested`,
+      mark: '◎', tone: 'orange',
+    },
+    {
+      label: 'Deliveries in progress',
+      value: activeDeliveries.length.toLocaleString('en'),
+      unit: 'deliveries',
+      note: 'Saved deliveries not yet marked delivered',
+      mark: '⌁', tone: 'blue',
+    },
+    {
+      label: 'Rescued this week',
+      value: rescuedThisWeek.toLocaleString('en'),
+      unit: 'portions',
+      note: 'Confirmed arrivals before expiry',
+      mark: '✳', tone: 'purple',
+    },
+  ]
+
+  const dashboardDeliveries = activeDeliveries.slice(0, 5).map((item) => {
+    let tone = 'pickup'
+    if (item.status === 'Reassigned') tone = 'moving'
+    if (item.status === 'Reassignment needed') tone = 'risk'
+    return {
+      id: `DL-${String(item.id).padStart(3, '0')}`,
+      food: `${item.portions} portions · ${item.food_item || 'Food'}`,
+      donor: item.donor || 'Donor unavailable',
+      recipient: item.organization || 'Recipient unavailable',
+      eta: formatClock(item.eta),
+      expiry: formatClock(item.expires_at),
+      partner: item.partner_name || 'Partner needed',
+      status: item.status,
+      tone,
+    }
+  })
+
+  const activity = [
+    ...surpluses.map((item) => ({
+      id: `surplus-${item.id}`,
+      at: item.created_at,
+      type: 'Surplus posted',
+      text: `${item.food_item} · ${item.portions} portions offered by ${item.donor}.`,
+      symbol: '↗', tone: 'green',
+    })),
+    ...needs.map((item) => ({
+      id: `need-${item.id}`,
+      at: item.created_at,
+      type: 'Need shared',
+      text: `${item.organization} requested ${item.portions_needed} portions of ${item.food_needed}.`,
+      symbol: '◎', tone: 'orange',
+    })),
+    ...deliveries.map((item) => {
+      const isDelivered = item.status.startsWith('Delivered')
+      const isReassigned = item.status === 'Reassigned' || item.status === 'Reassignment needed'
+      return {
+        id: `delivery-${item.id}`,
+        at: item.updated_at || item.arrived_at || item.created_at,
+        type: isDelivered ? 'Arrival recorded' : isReassigned ? 'Partner reassigned' : 'Delivery matched',
+        text: `${item.portions} portions of ${item.food_item || 'food'} for ${item.organization || 'recipient'} · ${item.status}.`,
+        symbol: isDelivered ? '✳' : isReassigned ? '⌁' : '◎',
+        tone: isDelivered ? 'green' : isReassigned ? 'blue' : 'orange',
+      }
+    }),
+  ]
+    .sort((a, b) => (parseDatabaseDate(b.at)?.getTime() || 0) - (parseDatabaseDate(a.at)?.getTime() || 0))
+    .slice(0, 5)
+    .map((item) => ({ ...item, time: relativeTime(item.at, now) }))
+
+  return {
+    forecast,
+    stats,
+    deliveries: dashboardDeliveries,
+    activity,
+    updatedAt: now.toISOString(),
+    availableSurplusPortions: availablePortions,
+  }
+}
+
 app.get('/', (req, res) => {
   res.send('FoodLink backend is running. Open /api/health to check it.')
 })
 
 app.get('/api/health', (req, res) => {
   res.json({ ok: true, message: 'FoodLink API is running' })
+})
+
+app.get('/api/dashboard', (req, res) => {
+  res.json(getDashboardData())
 })
 
 app.get('/api/surpluses', (req, res) => {
@@ -357,7 +555,7 @@ app.post('/api/deliveries/:id/reassign', (req, res) => {
   if (!partner || !eta) {
     db.prepare(`
       UPDATE deliveries
-      SET partner_id = NULL, eta = NULL, status = 'Reassignment needed'
+      SET partner_id = NULL, eta = NULL, status = 'Reassignment needed', updated_at = CURRENT_TIMESTAMP
       WHERE id = ?
     `).run(id)
 
@@ -369,7 +567,7 @@ app.post('/api/deliveries/:id/reassign', (req, res) => {
 
   db.prepare(`
     UPDATE deliveries
-    SET partner_id = ?, eta = ?, status = 'Reassigned', arrived_at = NULL
+    SET partner_id = ?, eta = ?, status = 'Reassigned', arrived_at = NULL, updated_at = CURRENT_TIMESTAMP
     WHERE id = ?
   `).run(partner.id, eta, id)
 
@@ -394,7 +592,7 @@ app.post('/api/deliveries/:id/arrived', (req, res) => {
 
   db.prepare(`
     UPDATE deliveries
-    SET status = ?, arrived_at = ?
+    SET status = ?, arrived_at = ?, updated_at = CURRENT_TIMESTAMP
     WHERE id = ?
   `).run(status, arrivedAt.toISOString(), id)
 
